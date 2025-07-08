@@ -181,7 +181,8 @@ async def fetch_data(
             
             # Create data.json
             dummy_data = create_dummy_data_file()
-            response_data["files_created"].append(str(DATA_DIR / "data.json"))
+            timestamp_filename = datetime.now().strftime("%Y-%m-%d-%H-%M-%S.json")
+            response_data["files_created"].append(str(DATA_DIR / timestamp_filename))
             response_data["data_file_preview"] = dummy_data
             
             response_data["message"] = "Files created successfully"
