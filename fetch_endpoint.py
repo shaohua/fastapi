@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -47,7 +47,7 @@ def ensure_data_directory() -> None:
 
 def create_last_fetched_file() -> dict:
     """Create the last_fetched.json file with current timestamp."""
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     timestamp_data = {
         "timestamp": now.isoformat(),
         "unix_timestamp": int(now.timestamp()),
@@ -86,7 +86,7 @@ def create_dummy_data_file() -> dict:
                 "api_endpoint": "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery",
                 "category": "AI"
             },
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
         file_path = DATA_DIR / "data.json"
@@ -118,7 +118,7 @@ def create_dummy_data_file() -> dict:
                 "version": "1.0",
                 "source": "fetch_endpoint_fallback"
             },
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
         file_path = DATA_DIR / "data.json"
@@ -158,7 +158,7 @@ async def fetch_data(
     response_data = {
         "status": "success",
         "dry_run": bool(dryrun),
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "files_created": []
     }
     
@@ -173,18 +173,49 @@ async def fetch_data(
         # Actual execution - create the files
         try:
             ensure_data_directory()
-            
-            # Create last_fetched.json
-            timestamp_data = create_last_fetched_file()
-            response_data["files_created"].append(str(DATA_DIR / "last_fetched.json"))
-            response_data["last_fetched_data"] = timestamp_data
-            
-            # Create data.json
-            dummy_data = create_dummy_data_file()
-            timestamp_filename = datetime.now().strftime("%Y-%m-%d-%H-%M-%S.json")
-            response_data["files_created"].append(str(DATA_DIR / timestamp_filename))
-            
-            response_data["message"] = "Files created successfully"
+            # Check if last_fetched.json exists and read its timestamp
+            last_fetched_path = DATA_DIR / "last_fetched.json"
+            if last_fetched_path.exists():
+                try:
+                    with open(last_fetched_path, 'r') as f:
+                        last_fetched = json.load(f)
+                        time_diff = datetime.now(timezone.utc) - datetime.fromtimestamp(last_fetched['unix_timestamp'], tz=timezone.utc)
+
+                        # If less than 6 hours have passed
+                        if time_diff.total_seconds() < 21600:  # 6 hours = 21600 seconds
+                            logger.info("Less than 6 hours since last update, skipping data.json creation")
+                            response_data["message"] = "Using existing data (less than 6 hours old)"
+                            response_data["last_fetched_data"] = last_fetched
+                            return response_data
+                except Exception as e:
+                    logger.warning(f"Error reading last_fetched.json: {e}, will proceed with update")
+
+            # Create files atomically - if one fails, we don't want partial state
+            timestamp_data = None
+            dummy_data = None
+
+            try:
+                # Create last_fetched.json
+                timestamp_data = create_last_fetched_file()
+                response_data["files_created"].append(str(DATA_DIR / "last_fetched.json"))
+                response_data["last_fetched_data"] = timestamp_data
+
+                # Create data.json
+                dummy_data = create_dummy_data_file()
+                response_data["files_created"].append(str(DATA_DIR / "data.json"))
+
+                response_data["message"] = "Files created successfully"
+
+            except Exception as file_error:
+                # If data.json creation fails after last_fetched.json was created,
+                # we should clean up the last_fetched.json to maintain consistency
+                if timestamp_data is not None and dummy_data is None:
+                    try:
+                        last_fetched_path.unlink(missing_ok=True)
+                        logger.info("Cleaned up last_fetched.json due to data.json creation failure")
+                    except Exception as cleanup_error:
+                        logger.error(f"Failed to cleanup last_fetched.json: {cleanup_error}")
+                raise file_error
             
         except Exception as e:
             raise HTTPException(
