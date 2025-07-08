@@ -7,6 +7,7 @@ from typing import Optional
 import uuid
 import logging
 from config import VALID_CLIENT_KEYS, DATA_DIRECTORY
+from marketplace_api import get_all_ai_extensions
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -65,33 +66,70 @@ def create_last_fetched_file() -> dict:
 
 
 def create_dummy_data_file() -> dict:
-    """Create a dummy data.json file."""
-    dummy_data = {
-        "status": "success",
-        "data": {
-            "message": "This is dummy data",
-            "items": [
-                {"id": 1, "name": "Sample Item 1", "value": "example"},
-                {"id": 2, "name": "Sample Item 2", "value": "demo"}
-            ],
-            "count": 2
-        },
-        "metadata": {
-            "version": "1.0",
-            "source": "fetch_endpoint"
-        },
-        "created_at": datetime.now().isoformat()
-    }
-
-    file_path = DATA_DIR / "data.json"
+    """Create a data.json file with VS Code marketplace AI extensions."""
     try:
-        with open(file_path, 'w') as f:
-            json.dump(dummy_data, f, indent=2)
-        logger.info(f"Created data.json at {file_path}")
-        return dummy_data
+        # Fetch AI extensions from VS Code marketplace
+        logger.info("Fetching AI extensions from VS Code marketplace...")
+        extensions = get_all_ai_extensions()
+
+        # Create data structure compatible with existing format
+        marketplace_data = {
+            "status": "success",
+            "data": {
+                "message": f"VS Code AI extensions data - {len(extensions)} extensions found",
+                "items": extensions,
+                "count": len(extensions)
+            },
+            "metadata": {
+                "version": "1.0",
+                "source": "vscode_marketplace",
+                "api_endpoint": "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery",
+                "category": "AI"
+            },
+            "created_at": datetime.now().isoformat()
+        }
+
+        file_path = DATA_DIR / "data.json"
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(marketplace_data, f, indent=2)
+            logger.info(f"Created data.json with {len(extensions)} AI extensions at {file_path}")
+            return marketplace_data
+        except Exception as e:
+            logger.error(f"Error writing data.json: {e}")
+            raise
+
     except Exception as e:
-        logger.error(f"Error creating data.json: {e}")
-        raise
+        logger.error(f"Error fetching marketplace data: {e}")
+        # Fallback to dummy data if marketplace API fails
+        logger.info("Falling back to dummy data due to marketplace API error")
+        fallback_data = {
+            "status": "success",
+            "data": {
+                "message": "Fallback dummy data (marketplace API failed)",
+                "items": [
+                    {"id": 1, "name": "Sample Item 1", "value": "example"},
+                    {"id": 2, "name": "Sample Item 2", "value": "demo"}
+                ],
+                "count": 2,
+                "error": str(e)
+            },
+            "metadata": {
+                "version": "1.0",
+                "source": "fetch_endpoint_fallback"
+            },
+            "created_at": datetime.now().isoformat()
+        }
+
+        file_path = DATA_DIR / "data.json"
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(fallback_data, f, indent=2)
+            logger.info(f"Created fallback data.json at {file_path}")
+            return fallback_data
+        except Exception as write_error:
+            logger.error(f"Error creating fallback data.json: {write_error}")
+            raise
 
 
 async def fetch_data(
