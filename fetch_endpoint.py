@@ -92,7 +92,8 @@ def create_dummy_data_file() -> dict:
             "created_at": datetime.now(PST).isoformat()
         }
 
-        file_path = DATA_DIR / "data.json"
+        timestamp_filename = datetime.now(PST).strftime("%Y-%m-%d-%H-%M-%S.json")
+        file_path = DATA_DIR / timestamp_filename
         try:
             with open(file_path, 'w') as f:
                 json.dump(marketplace_data, f, indent=2)
