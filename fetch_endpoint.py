@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import os
 from pathlib import Path
@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 # Configuration
 VALID_KEYS = VALID_CLIENT_KEYS
 DATA_DIR = Path(DATA_DIRECTORY)
+
+# PST timezone (UTC-8)
+PST = timezone(timedelta(hours=-8))
 
 
 def validate_client_key(key: str) -> bool:
@@ -47,11 +50,11 @@ def ensure_data_directory() -> None:
 
 def create_last_fetched_file() -> dict:
     """Create the last_fetched.json file with current timestamp."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(PST)
     timestamp_data = {
         "timestamp": now.isoformat(),
         "unix_timestamp": int(now.timestamp()),
-        "human_readable": now.strftime("%Y-%m-%d %H:%M:%S UTC")
+        "human_readable": now.strftime("%Y-%m-%d %H:%M:%S PST")
     }
 
     file_path = DATA_DIR / "last_fetched.json"
@@ -86,7 +89,7 @@ def create_dummy_data_file() -> dict:
                 "api_endpoint": "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery",
                 "category": "AI"
             },
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(PST).isoformat()
         }
 
         file_path = DATA_DIR / "data.json"
@@ -118,7 +121,7 @@ def create_dummy_data_file() -> dict:
                 "version": "1.0",
                 "source": "fetch_endpoint_fallback"
             },
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(PST).isoformat()
         }
 
         file_path = DATA_DIR / "data.json"
@@ -158,7 +161,7 @@ async def fetch_data(
     response_data = {
         "status": "success",
         "dry_run": bool(dryrun),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(PST).isoformat(),
         "files_created": []
     }
     
@@ -179,7 +182,7 @@ async def fetch_data(
                 try:
                     with open(last_fetched_path, 'r') as f:
                         last_fetched = json.load(f)
-                        time_diff = datetime.now(timezone.utc) - datetime.fromtimestamp(last_fetched['unix_timestamp'], tz=timezone.utc)
+                        time_diff = datetime.now(PST) - datetime.fromtimestamp(last_fetched['unix_timestamp'], tz=PST)
 
                         # If less than 6 hours have passed
                         if time_diff.total_seconds() < 21600:  # 6 hours = 21600 seconds
