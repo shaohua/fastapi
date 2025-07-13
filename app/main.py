@@ -32,10 +32,6 @@ class IngestRequest(BaseModel):
     filename: str
     key: str
 
-class AutoSyncRequest(BaseModel):
-    key: str
-    dryrun: bool = False
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle - startup and shutdown."""
@@ -314,8 +310,11 @@ async def process_json_file_async(json_file_path):
     except Exception as e:
         raise ValueError(f"Error processing file: {e}")
 
-@app.post("/api/auto-sync")
-async def auto_sync_files(request: AutoSyncRequest):
+@app.get("/api/auto-sync")
+async def auto_sync_files(
+    key: str = Query(..., description="Client authentication key"),
+    dryrun: int = Query(0, description="Dry run mode: 1 for dry run, 0 for actual processing")
+):
     """
     Automatically sync unprocessed JSON files to database.
 
@@ -333,7 +332,7 @@ async def auto_sync_files(request: AutoSyncRequest):
     """
 
     # Validate client key
-    if not validate_client_key(request.key):
+    if not validate_client_key(key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or unauthorized client key"
@@ -355,7 +354,7 @@ async def auto_sync_files(request: AutoSyncRequest):
             "files_processed": 0,
             "files_failed": 0,
             "total_records": 0,
-            "dry_run": request.dryrun,
+            "dry_run": bool(dryrun),
             "latest_db_record": latest_db_timestamp.isoformat() if latest_db_timestamp else None
         }
 
@@ -365,7 +364,7 @@ async def auto_sync_files(request: AutoSyncRequest):
             return response_data
 
         # If dry run, just report what would be done
-        if request.dryrun:
+        if dryrun == 1:
             response_data["message"] = f"Would process {len(unprocessed_files)} files"
             response_data["files_to_process"] = unprocessed_files
             return response_data
