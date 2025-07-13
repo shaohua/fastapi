@@ -8,12 +8,16 @@ import json
 import os
 import logging
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.database import init_db, close_db, fetch_all, fetch_one
 from app.fetch_endpoint import fetch_data, validate_client_key, sync_status_check
+
+# Load environment variables at application startup
+load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

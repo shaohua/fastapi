@@ -8,9 +8,6 @@ from contextlib import asynccontextmanager
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
-from dotenv import load_dotenv
-
-load_dotenv()
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://localhost/vscode_stats')
 

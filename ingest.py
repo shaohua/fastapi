@@ -23,7 +23,7 @@ from psycopg.rows import dict_row
 from tqdm import tqdm
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables (for standalone script usage)
 load_dotenv()
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://localhost/vscode_stats')
