@@ -9,6 +9,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, Query
@@ -22,6 +23,9 @@ from config import DATA_DIRECTORY
 
 # Load environment variables at application startup
 load_dotenv()
+
+# Pacific timezone (handles PST/PDT automatically)
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 # Pydantic models for request validation
 class IngestRequest(BaseModel):
@@ -224,7 +228,7 @@ async def download_data_tar(
     )
 
 def parse_timestamp_from_json(data):
-    """Extract timestamp from JSON data's created_at field."""
+    """Extract timestamp from JSON data's created_at field, returning timezone-aware datetime in Pacific time."""
     try:
         created_at_str = data.get('created_at')
         if not created_at_str:
@@ -233,9 +237,13 @@ def parse_timestamp_from_json(data):
         # Parse ISO format timestamp with timezone
         dt = datetime.fromisoformat(created_at_str)
 
-        # Convert to naive datetime (removing timezone info)
+        # Ensure we have a timezone-aware datetime in Pacific time (PST/PDT)
         if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
+            # Convert to Pacific time
+            dt = dt.astimezone(PACIFIC_TZ)
+        else:
+            # If no timezone info, assume it's already in Pacific time
+            dt = dt.replace(tzinfo=PACIFIC_TZ)
 
         return dt
     except (ValueError, TypeError) as e:

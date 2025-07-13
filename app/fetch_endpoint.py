@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import os
 import glob
@@ -19,8 +20,8 @@ logger = logging.getLogger(__name__)
 VALID_KEYS = VALID_CLIENT_KEYS
 DATA_DIR = Path(DATA_DIRECTORY)
 
-# PST timezone (UTC-8)
-PST = timezone(timedelta(hours=-8))
+# Pacific timezone (handles PST/PDT automatically)
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 
 def validate_client_key(key: str) -> bool:
@@ -52,11 +53,11 @@ def ensure_data_directory() -> None:
 
 def create_last_fetched_file() -> dict:
     """Create the last_fetched.json file with current timestamp."""
-    now = datetime.now(PST)
+    now = datetime.now(PACIFIC_TZ)
     timestamp_data = {
         "timestamp": now.isoformat(),
         "unix_timestamp": int(now.timestamp()),
-        "human_readable": now.strftime("%Y-%m-%d %H:%M:%S PST")
+        "human_readable": now.strftime("%Y-%m-%d %H:%M:%S %Z")
     }
 
     file_path = DATA_DIR / "last_fetched.json"
@@ -91,10 +92,10 @@ def create_dummy_data_file() -> dict:
                 "api_endpoint": "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery",
                 "category": "AI"
             },
-            "created_at": datetime.now(PST).isoformat()
+            "created_at": datetime.now(PACIFIC_TZ).isoformat()
         }
 
-        timestamp_filename = datetime.now(PST).strftime("%Y-%m-%d-%H-%M-%S.json")
+        timestamp_filename = datetime.now(PACIFIC_TZ).strftime("%Y-%m-%d-%H-%M-%S.json")
         file_path = DATA_DIR / timestamp_filename
         try:
             with open(file_path, 'w') as f:
@@ -124,7 +125,7 @@ def create_dummy_data_file() -> dict:
                 "version": "1.0",
                 "source": "fetch_endpoint_fallback"
             },
-            "created_at": datetime.now(PST).isoformat()
+            "created_at": datetime.now(PACIFIC_TZ).isoformat()
         }
 
         file_path = DATA_DIR / "data.json"
@@ -164,7 +165,7 @@ async def fetch_data(
     response_data = {
         "status": "success",
         "dry_run": bool(dryrun),
-        "timestamp": datetime.now(PST).isoformat(),
+        "timestamp": datetime.now(PACIFIC_TZ).isoformat(),
         "files_created": []
     }
     
@@ -185,7 +186,7 @@ async def fetch_data(
                 try:
                     with open(last_fetched_path, 'r') as f:
                         last_fetched = json.load(f)
-                        time_diff = datetime.now(PST) - datetime.fromtimestamp(last_fetched['unix_timestamp'], tz=PST)
+                        time_diff = datetime.now(PACIFIC_TZ) - datetime.fromtimestamp(last_fetched['unix_timestamp'], tz=PACIFIC_TZ)
 
                         # If less than 6 hours have passed
                         if time_diff.total_seconds() < 21600:  # 6 hours = 21600 seconds
@@ -255,19 +256,28 @@ def parse_json_file_timestamp(file_path: Path) -> datetime:
             # Expected format: YYYY-MM-DD-HH-MM-SS.json
             filename = file_path.stem
             try:
-                return datetime.strptime(filename, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=PST)
+                return datetime.strptime(filename, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=PACIFIC_TZ)
             except ValueError:
                 logger.warning(f"Could not parse timestamp from filename: {filename}")
-                return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PST)
+                return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PACIFIC_TZ)
 
-        # Parse ISO format timestamp
+        # Parse ISO format timestamp and ensure it's in PST
         dt = datetime.fromisoformat(created_at_str)
+
+        # Ensure we have a timezone-aware datetime in Pacific time
+        if dt.tzinfo is not None:
+            # Convert to Pacific time
+            dt = dt.astimezone(PACIFIC_TZ)
+        else:
+            # If no timezone info, assume it's already in Pacific time
+            dt = dt.replace(tzinfo=PACIFIC_TZ)
+
         return dt
 
     except Exception as e:
         logger.warning(f"Error parsing timestamp from {file_path}: {e}")
         # Fallback to file modification time
-        return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PST)
+        return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PACIFIC_TZ)
 
 
 def get_unprocessed_json_files(latest_db_timestamp: datetime = None) -> List[str]:
@@ -363,7 +373,7 @@ async def sync_status_check(
         # Prepare response
         response_data = {
             "status": "success",
-            "timestamp": datetime.now(PST).isoformat(),
+            "timestamp": datetime.now(PACIFIC_TZ).isoformat(),
             "latest_db_record": latest_db_timestamp.isoformat() if latest_db_timestamp else None,
             "total_json_files": len(data_json_files),
             "unprocessed_files": unprocessed_files,

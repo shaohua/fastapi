@@ -17,6 +17,7 @@ import json
 import glob
 import shutil
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import psycopg
 from psycopg.rows import dict_row
@@ -31,6 +32,9 @@ RAW_JSON_DIR = Path('data')
 PROCESSED_JSON_DIR = Path('processed_json')
 BATCH_SIZE = 500
 
+# Pacific timezone (handles PST/PDT automatically)
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
+
 def ensure_directories():
     """Create necessary directories if they don't exist."""
     RAW_JSON_DIR.mkdir(exist_ok=True)
@@ -39,28 +43,31 @@ def ensure_directories():
 def parse_timestamp_from_json(data):
     """
     Extract timestamp from JSON data's created_at field.
-    Returns datetime object, handling timezone conversion.
+    Returns timezone-aware datetime object in Pacific time (PST/PDT).
     """
     try:
         created_at_str = data.get('created_at')
         if not created_at_str:
             print(f"Warning: No created_at field found in JSON data")
-            return datetime.now()
+            return datetime.now(PACIFIC_TZ)
 
         # Parse ISO format timestamp with timezone
         # Example: "2025-07-12T12:06:24.275317-08:00"
         dt = datetime.fromisoformat(created_at_str)
 
-        # Convert to naive datetime (removing timezone info)
-        # This assumes the database will store as UTC or local time
+        # Ensure we have a timezone-aware datetime in Pacific time
         if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
+            # Convert to Pacific time
+            dt = dt.astimezone(PACIFIC_TZ)
+        else:
+            # If no timezone info, assume it's already in Pacific time
+            dt = dt.replace(tzinfo=PACIFIC_TZ)
 
         return dt
 
     except (ValueError, TypeError) as e:
         print(f"Warning: Could not parse timestamp from created_at field: {e}")
-        return datetime.now()
+        return datetime.now(PACIFIC_TZ)
 
 def process_json_file(conn, json_file_path):
     """

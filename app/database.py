@@ -61,6 +61,8 @@ async def execute_query(query: str, *args):
 
 async def check_timestamp_exists(captured_at):
     """Check if any records exist with the given captured_at timestamp."""
+    # PostgreSQL TIMESTAMPTZ handles timezone-aware comparisons automatically
+    # It will convert both sides to UTC for comparison
     query = "SELECT COUNT(*) as count FROM extension_stats WHERE captured_at = %s"
     result = await fetch_one(query, captured_at)
     return result['count'] > 0 if result else False
