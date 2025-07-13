@@ -2,12 +2,14 @@ from fastapi import FastAPI, HTTPException, Query
 from datetime import datetime, timezone, timedelta
 import json
 import os
+import glob
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import uuid
 import logging
 from config import VALID_CLIENT_KEYS, DATA_DIRECTORY
 from marketplace_api import get_all_ai_extensions
+from app.database import fetch_one
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -226,5 +228,158 @@ async def fetch_data(
                 status_code=500,
                 detail=f"Error creating files: {str(e)}"
             )
-    
+
     return response_data
+
+
+async def get_latest_db_timestamp():
+    """Get the latest captured_at timestamp from the database."""
+    try:
+        query = "SELECT MAX(captured_at) as latest_captured_at FROM extension_stats"
+        result = await fetch_one(query)
+        return result['latest_captured_at'] if result and result['latest_captured_at'] else None
+    except Exception as e:
+        logger.error(f"Error querying database for latest timestamp: {e}")
+        raise
+
+
+def parse_json_file_timestamp(file_path: Path) -> datetime:
+    """Parse the created_at timestamp from a JSON file."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        created_at_str = data.get('created_at')
+        if not created_at_str:
+            # Fallback: try to parse from filename if no created_at field
+            # Expected format: YYYY-MM-DD-HH-MM-SS.json
+            filename = file_path.stem
+            try:
+                return datetime.strptime(filename, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=PST)
+            except ValueError:
+                logger.warning(f"Could not parse timestamp from filename: {filename}")
+                return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PST)
+
+        # Parse ISO format timestamp
+        dt = datetime.fromisoformat(created_at_str)
+        return dt
+
+    except Exception as e:
+        logger.warning(f"Error parsing timestamp from {file_path}: {e}")
+        # Fallback to file modification time
+        return datetime.fromtimestamp(file_path.stat().st_mtime, tz=PST)
+
+
+def get_unprocessed_json_files(latest_db_timestamp: datetime = None) -> List[str]:
+    """
+    Find JSON files in data directory that haven't been processed.
+
+    Args:
+        latest_db_timestamp: Latest captured_at from database
+
+    Returns:
+        List of unprocessed filenames
+    """
+    try:
+        # Get all JSON files in data directory
+        json_files = sorted(glob.glob(str(DATA_DIR / "*.json")))
+
+        # Get processed files directory
+        processed_dir = Path("processed_json")
+        processed_files = set()
+        if processed_dir.exists():
+            processed_files = {Path(f).name for f in glob.glob(str(processed_dir / "*.json"))}
+
+        unprocessed_files = []
+
+        for json_file in json_files:
+            file_path = Path(json_file)
+            filename = file_path.name
+
+            # Skip special files like last_fetched.json
+            if filename in ['last_fetched.json']:
+                continue
+
+            # Check if file has been processed (moved to processed_json/)
+            if filename in processed_files:
+                continue
+
+            # If we have a latest DB timestamp, check if file is newer
+            if latest_db_timestamp:
+                try:
+                    file_timestamp = parse_json_file_timestamp(file_path)
+                    # Only include files newer than the latest DB record
+                    if file_timestamp <= latest_db_timestamp:
+                        continue
+                except Exception as e:
+                    logger.warning(f"Could not parse timestamp for {filename}: {e}")
+                    # Include file if we can't parse timestamp (safer to include)
+
+            unprocessed_files.append(filename)
+
+        return unprocessed_files
+
+    except Exception as e:
+        logger.error(f"Error scanning for unprocessed files: {e}")
+        raise
+
+
+async def sync_status_check(
+    key: str = Query(..., description="UUID key for client validation"),
+    dryrun: int = Query(0, description="Dry run mode: 1 for dry run, 0 for actual execution")
+):
+    """
+    Sync status endpoint that compares database records with JSON files.
+
+    Returns information about unprocessed JSON files in the data directory.
+
+    Parameters:
+    - key: UUID string to validate the client
+    - dryrun: 1 for dry run (no side effects), 0 for actual execution
+
+    Returns:
+    - Status response with unprocessed file information
+    """
+
+    # Validate client key
+    if not validate_client_key(key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or unauthorized client key"
+        )
+
+    try:
+        # Get latest timestamp from database
+        latest_db_timestamp = await get_latest_db_timestamp()
+
+        # Get all JSON files in data directory
+        all_json_files = glob.glob(str(DATA_DIR / "*.json"))
+        # Filter out special files
+        data_json_files = [f for f in all_json_files if not Path(f).name.startswith('last_fetched')]
+
+        # Find unprocessed files
+        unprocessed_files = get_unprocessed_json_files(latest_db_timestamp)
+
+        # Prepare response
+        response_data = {
+            "status": "success",
+            "timestamp": datetime.now(PST).isoformat(),
+            "latest_db_record": latest_db_timestamp.isoformat() if latest_db_timestamp else None,
+            "total_json_files": len(data_json_files),
+            "unprocessed_files": unprocessed_files,
+            "unprocessed_count": len(unprocessed_files),
+            "dry_run": bool(dryrun)
+        }
+
+        if latest_db_timestamp is None:
+            response_data["warning"] = "No records found in database - all files considered unprocessed"
+
+        logger.info(f"Sync status check completed: {len(unprocessed_files)} unprocessed files found")
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Error in sync status check: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error checking sync status: {str(e)}"
+        )

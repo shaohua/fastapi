@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.database import init_db, close_db, fetch_all, fetch_one
-from app.fetch_endpoint import fetch_data, validate_client_key
+from app.fetch_endpoint import fetch_data, validate_client_key, sync_status_check
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -212,6 +212,9 @@ async def download_data_tar(
 
 # Include the fetch endpoint with /api prefix
 app.get("/api/fetch")(fetch_data)
+
+# Include the sync status endpoint with /api prefix
+app.get("/api/sync-status")(sync_status_check)
 
 if __name__ == "__main__":
     import uvicorn
