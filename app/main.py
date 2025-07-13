@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from app.database import init_db, close_db, fetch_all, fetch_one, check_timestamp_exists, execute_query
 from app.fetch_endpoint import fetch_data, validate_client_key, sync_status_check
+from config import DATA_DIRECTORY
 
 # Load environment variables at application startup
 load_dotenv()
@@ -329,7 +330,7 @@ async def ingest_json_file(request: IngestRequest):
         )
 
     # Check if file exists in data directory
-    data_dir = Path("data")
+    data_dir = Path(DATA_DIRECTORY)
     file_path = data_dir / request.filename
 
     if not file_path.exists():
