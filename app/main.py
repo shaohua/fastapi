@@ -32,6 +32,10 @@ class IngestRequest(BaseModel):
     filename: str
     key: str
 
+class AutoSyncRequest(BaseModel):
+    key: str
+    dryrun: bool = False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle - startup and shutdown."""
@@ -309,6 +313,123 @@ async def process_json_file_async(json_file_path):
         raise ValueError(f"Error parsing JSON file: {e}")
     except Exception as e:
         raise ValueError(f"Error processing file: {e}")
+
+@app.post("/api/auto-sync")
+async def auto_sync_files(request: AutoSyncRequest):
+    """
+    Automatically sync unprocessed JSON files to database.
+
+    Combines the functionality of sync-status and ingest endpoints:
+    1. Finds unprocessed files in data directory
+    2. Ingests each file to database
+    3. Returns summary of processing results
+
+    Parameters:
+    - key: UUID string to validate the client
+    - dryrun: If true, only report what would be done without ingesting
+
+    Returns:
+    - Summary of files found, processed, and any errors
+    """
+
+    # Validate client key
+    if not validate_client_key(request.key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or unauthorized client key"
+        )
+
+    try:
+        # Import the functions we need from fetch_endpoint
+        from app.fetch_endpoint import get_latest_db_timestamp, get_unprocessed_json_files
+
+        # Discovery phase: find unprocessed files
+        latest_db_timestamp = await get_latest_db_timestamp()
+        unprocessed_files = get_unprocessed_json_files(latest_db_timestamp)
+
+        # Initialize response data
+        response_data = {
+            "status": "success",
+            "timestamp": datetime.now(PACIFIC_TZ).isoformat(),
+            "files_found": len(unprocessed_files),
+            "files_processed": 0,
+            "files_failed": 0,
+            "total_records": 0,
+            "dry_run": request.dryrun,
+            "latest_db_record": latest_db_timestamp.isoformat() if latest_db_timestamp else None
+        }
+
+        # If no files to process, return early
+        if not unprocessed_files:
+            response_data["message"] = "No unprocessed files found"
+            return response_data
+
+        # If dry run, just report what would be done
+        if request.dryrun:
+            response_data["message"] = f"Would process {len(unprocessed_files)} files"
+            response_data["files_to_process"] = unprocessed_files
+            return response_data
+
+        # Processing phase: ingest each file
+        data_dir = Path(DATA_DIRECTORY)
+        failed_files = []
+
+        for filename in unprocessed_files:
+            file_path = data_dir / filename
+
+            if not file_path.exists():
+                logger.warning(f"File not found: {filename}")
+                failed_files.append({"filename": filename, "error": "File not found"})
+                response_data["files_failed"] += 1
+                continue
+
+            try:
+                # Load JSON to get timestamp
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    json_data = json.load(f)
+
+                captured_at = parse_timestamp_from_json(json_data)
+
+                # Check if data already exists in database
+                if await check_timestamp_exists(captured_at):
+                    logger.info(f"Data from {filename} already exists, skipping")
+                    continue
+
+                # Process the file
+                records_inserted, parsed_timestamp = await process_json_file_async(file_path)
+
+                response_data["files_processed"] += 1
+                response_data["total_records"] += records_inserted
+
+                logger.info(f"Successfully processed {filename}: {records_inserted} records")
+
+            except Exception as e:
+                logger.error(f"Error processing file {filename}: {e}")
+                failed_files.append({"filename": filename, "error": str(e)})
+                response_data["files_failed"] += 1
+                continue
+
+        # Update status based on results
+        if response_data["files_failed"] > 0:
+            if response_data["files_processed"] > 0:
+                response_data["status"] = "partial"
+                response_data["message"] = f"Processed {response_data['files_processed']} files, {response_data['files_failed']} failed"
+            else:
+                response_data["status"] = "error"
+                response_data["message"] = f"All {response_data['files_failed']} files failed to process"
+        else:
+            response_data["message"] = f"Successfully processed {response_data['files_processed']} files"
+
+        # Add failed files details if any
+        if failed_files:
+            response_data["failed_files"] = failed_files
+
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Error in auto-sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.post("/api/ingest")
 async def ingest_json_file(request: IngestRequest):
