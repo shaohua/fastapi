@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block description %}{{ extension.description[:150] }}{% if extension.description|length > 150 %}...{% endif %} - Install count: {{ "{:,}".format(extension.install_count) }}, Rating: {{ extension.rating }}{% endblock %}
+
+{% block head %}
+<!-- JSON-LD structured data for SEO -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "{{ extension.name }}",
+  "description": "{{ extension.description }}",
+  "publisher": {
+    "@type": "Organization", 
+    "name": "{{ extension.publisher }}"
+  },
+  "downloadUrl": "https://marketplace.visualstudio.com/items?itemName={{ extension.extension_id }}",
+  "installUrl": "vscode:extension/{{ extension.extension_id }}",
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": {{ extension.rating or 0 }},
+    "ratingCount": {{ extension.rating_count or 0 }}
+  }
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Extension Header -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <h1 class="text-2xl font-bold text-gray-900">{{ extension.name }}</h1>
+                <p class="text-sm text-gray-500 mt-1">by {{ extension.publisher }}</p>
+                <p class="text-gray-600 mt-2">{{ extension.description }}</p>
+                
+                <div class="flex items-center space-x-6 mt-4">
+                    <div>
+                        <span class="text-2xl font-bold text-blue-600">{{ "{:,}".format(extension.install_count) }}</span>
+                        <span class="text-sm text-gray-500 block">Installs</span>
+                    </div>
+                    {% if extension.rating %}
+                    <div>
+                        <div class="flex items-center">
+                            <span class="text-2xl font-bold text-yellow-600">{{ "%.1f"|format(extension.rating) }}</span>
+                            <span class="ml-1 text-yellow-400 text-xl">★</span>
+                        </div>
+                        <span class="text-sm text-gray-500">{{ "{:,}".format(extension.rating_count) }} ratings</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="flex space-x-3">
+                <a href="https://marketplace.visualstudio.com/items?itemName={{ extension.extension_id }}" 
+                   target="_blank"
+                   class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700">
+                    View in Marketplace
+                </a>
+                <a href="vscode:extension/{{ extension.extension_id }}"
+                   class="bg-gray-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">
+                    Install in VS Code
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Install Count Chart -->
+        <div class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Install Count (30 Days)</h2>
+            <div class="relative h-64">
+                <canvas id="installChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Rating Chart -->
+        <div class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Rating Trend (30 Days)</h2>
+            <div class="relative h-64">
+                <canvas id="ratingChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daily Growth Chart -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Daily Install Growth</h2>
+        <div class="relative h-80">
+            <canvas id="growthChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Embed chart data -->
+<script id="chartData" type="application/json">{{ chart_data|safe }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Get chart data from embedded JSON
+const chartData = JSON.parse(document.getElementById('chartData').textContent);
+
+// Chart.js default configuration
+Chart.defaults.font.family = 'system-ui, -apple-system, sans-serif';
+Chart.defaults.color = '#6B7280';
+
+// Install Count Chart
+const installCtx = document.getElementById('installChart').getContext('2d');
+new Chart(installCtx, {
+    type: 'line',
+    data: {
+        labels: chartData.labels,
+        datasets: [{
+            label: 'Install Count',
+            data: chartData.installs,
+            borderColor: '#3B82F6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: false,
+                ticks: {
+                    callback: function(value) {
+                        return value.toLocaleString();
+                    }
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+
+// Rating Chart
+const ratingCtx = document.getElementById('ratingChart').getContext('2d');
+new Chart(ratingCtx, {
+    type: 'line',
+    data: {
+        labels: chartData.labels,
+        datasets: [{
+            label: 'Rating',
+            data: chartData.rating,
+            borderColor: '#F59E0B',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            borderWidth: 2,
+            fill: true,
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                min: 0,
+                max: 5,
+                ticks: {
+                    stepSize: 0.5
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+
+// Daily Growth Chart
+const growthCtx = document.getElementById('growthChart').getContext('2d');
+const growthData = chartData.installs.map((current, index) => {
+    if (index === 0) return 0;
+    return current - chartData.installs[index - 1];
+});
+
+new Chart(growthCtx, {
+    type: 'bar',
+    data: {
+        labels: chartData.labels.slice(1), // Skip first day since no growth data
+        datasets: [{
+            label: 'Daily Growth',
+            data: growthData.slice(1),
+            backgroundColor: growthData.slice(1).map(value =>
+                value >= 0 ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)'
+            ),
+            borderColor: growthData.slice(1).map(value =>
+                value >= 0 ? '#22C55E' : '#EF4444'
+            ),
+            borderWidth: 1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                ticks: {
+                    callback: function(value) {
+                        return value.toLocaleString();
+                    }
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+</script>
+{% endblock %}

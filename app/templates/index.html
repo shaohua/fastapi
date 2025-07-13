@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block description %}Top growing VS Code extensions by install count. Track popularity trends and discover trending
+developer tools.{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="text-center">
+        <h1 class="text-3xl font-bold text-gray-900">Top Growing VS Code Extensions</h1>
+        <p class="mt-2 text-gray-600">Extensions with the highest install growth in the last 7 days</p>
+    </div>
+
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 table-fixed">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th
+                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6 min-w-0">
+                            Extension
+                        </th>
+                        <th
+                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6 min-w-0">
+                            Publisher
+                        </th>
+                        <th
+                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6 min-w-0">
+                            Installs
+                        </th>
+                        <th
+                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/12 min-w-0">
+                            Rating
+                        </th>
+                        <th
+                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4 min-w-0">
+                            7-Day Growth
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for ext in extensions %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4">
+                            <a href="/extension/{{ ext.extension_id }}"
+                                class="text-sm font-medium text-blue-600 hover:text-blue-800 block truncate">
+                                {{ ext.name }}
+                            </a>
+                            <div class="text-xs text-gray-500 truncate">{{ ext.extension_id }}</div>
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-900">
+                            <div class="truncate">{{ ext.publisher }}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {{ "{:,}".format(ext.install_count) }}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% if ext.rating %}
+                            <div class="flex items-center">
+                                <span class="text-sm text-gray-900">{{ "%.1f"|format(ext.rating) }}</span>
+                                <span class="ml-1 text-yellow-400">★</span>
+                            </div>
+                            {% else %}
+                            <span class="text-sm text-gray-400">No rating</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            {% if ext.growth_7d > 0 %}
+                            <div class="flex items-center text-green-600">
+                                <span class="text-sm font-medium">+{{ "{:,}".format(ext.growth_7d) }}</span>
+                                <svg class="ml-1 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z"
+                                        clip-rule="evenodd"></path>
+                                </svg>
+                            </div>
+                            {% elif ext.growth_7d < 0 %} <div class="flex items-center text-red-600">
+                                <span class="text-sm font-medium">{{ "{:,}".format(ext.growth_7d) }}</span>
+                                <svg class="ml-1 w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd"
+                                        d="M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z"
+                                        clip-rule="evenodd"></path>
+                                </svg>
+        </div>
+        {% else %}
+        <span class="text-sm text-gray-400">No change</span>
+        {% endif %}
+        </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+    <div class="flex">
+        <div class="flex-shrink-0">
+            <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                    clip-rule="evenodd"></path>
+            </svg>
+        </div>
+        <div class="ml-3">
+            <h3 class="text-sm font-medium text-blue-800">About the Data</h3>
+            <div class="mt-2 text-sm text-blue-700">
+                <p>Extension statistics are collected everyday from the VS Code Marketplace.</p>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+{% endblock %}
