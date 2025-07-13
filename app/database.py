@@ -50,3 +50,17 @@ async def fetch_one(query: str, *args):
         async with conn.cursor() as cur:
             await cur.execute(query, args)
             return await cur.fetchone()
+
+async def execute_query(query: str, *args):
+    """Execute a query (INSERT, UPDATE, DELETE) and return affected rows."""
+    async with get_db() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(query, args)
+            await conn.commit()
+            return cur.rowcount
+
+async def check_timestamp_exists(captured_at):
+    """Check if any records exist with the given captured_at timestamp."""
+    query = "SELECT COUNT(*) as count FROM extension_stats WHERE captured_at = %s"
+    result = await fetch_one(query, captured_at)
+    return result['count'] > 0 if result else False

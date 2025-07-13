@@ -8,16 +8,24 @@ import json
 import os
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from app.database import init_db, close_db, fetch_all, fetch_one
+from pydantic import BaseModel
+from app.database import init_db, close_db, fetch_all, fetch_one, check_timestamp_exists, execute_query
 from app.fetch_endpoint import fetch_data, validate_client_key, sync_status_check
 
 # Load environment variables at application startup
 load_dotenv()
+
+# Pydantic models for request validation
+class IngestRequest(BaseModel):
+    filename: str
+    key: str
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -213,6 +221,158 @@ async def download_data_tar(
         filename="data.tar",
         media_type="application/x-tar"
     )
+
+def parse_timestamp_from_json(data):
+    """Extract timestamp from JSON data's created_at field."""
+    try:
+        created_at_str = data.get('created_at')
+        if not created_at_str:
+            raise ValueError("No created_at field found in JSON data")
+
+        # Parse ISO format timestamp with timezone
+        dt = datetime.fromisoformat(created_at_str)
+
+        # Convert to naive datetime (removing timezone info)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+
+        return dt
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Could not parse timestamp from created_at field: {e}")
+
+async def process_json_file_async(json_file_path):
+    """Process a single JSON file and insert data into database (async version)."""
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            json_data = json.load(f)
+
+        # Extract timestamp from JSON created_at field
+        captured_at = parse_timestamp_from_json(json_data)
+
+        # Get the extensions list from the data.items field
+        if isinstance(json_data, dict) and 'data' in json_data and 'items' in json_data['data']:
+            extensions = json_data['data']['items']
+        elif isinstance(json_data, list):
+            extensions = json_data
+        else:
+            raise ValueError("JSON does not contain expected data structure")
+
+        rows_inserted = 0
+        batch_size = 500
+
+        # Process in batches
+        for i in range(0, len(extensions), batch_size):
+            batch = extensions[i:i + batch_size]
+
+            for ext in batch:
+                try:
+                    query = """
+                        INSERT INTO extension_stats
+                        (extension_id, name, publisher, description, version,
+                         install_count, rating, rating_count, tags, categories, captured_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (extension_id, captured_at) DO NOTHING
+                    """
+                    params = (
+                        ext.get('extension_id', ext.get('id', '')),
+                        ext.get('name', ''),
+                        ext.get('publisher', ''),
+                        ext.get('description', ''),
+                        ext.get('version', ''),
+                        ext.get('install_count', ext.get('installs', 0)),
+                        ext.get('rating', None),
+                        ext.get('rating_count', 0),
+                        ext.get('tags', []),
+                        ext.get('categories', []),
+                        captured_at
+                    )
+
+                    affected_rows = await execute_query(query, *params)
+                    rows_inserted += affected_rows
+
+                except Exception as e:
+                    logger.warning(f"Error inserting extension {ext.get('id', 'unknown')}: {e}")
+                    continue
+
+        return rows_inserted, captured_at
+
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Error parsing JSON file: {e}")
+    except Exception as e:
+        raise ValueError(f"Error processing file: {e}")
+
+@app.post("/api/ingest")
+async def ingest_json_file(request: IngestRequest):
+    """
+    Ingest a specific JSON file by filename with duplicate checking.
+
+    Parameters:
+    - filename: JSON filename in format YYYY-MM-DD-HH-MM-SS.json
+    - key: UUID string to validate the client
+
+    Returns:
+    - Success response with ingestion details
+    """
+
+    # Validate client key
+    if not validate_client_key(request.key):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or unauthorized client key"
+        )
+
+    # Validate filename format
+    if not request.filename.endswith('.json'):
+        raise HTTPException(
+            status_code=400,
+            detail="Filename must end with .json"
+        )
+
+    # Check if file exists in data directory
+    data_dir = Path("data")
+    file_path = data_dir / request.filename
+
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File {request.filename} not found in data directory"
+        )
+
+    try:
+        # Load JSON to get timestamp
+        with open(file_path, 'r', encoding='utf-8') as f:
+            json_data = json.load(f)
+
+        captured_at = parse_timestamp_from_json(json_data)
+
+        # Check if data already exists in database
+        if await check_timestamp_exists(captured_at):
+            return {
+                "status": "already_exists",
+                "message": f"Data from {captured_at} already exists in database",
+                "filename": request.filename,
+                "timestamp": captured_at.isoformat(),
+                "records_inserted": 0
+            }
+
+        # Process the file
+        records_inserted, parsed_timestamp = await process_json_file_async(file_path)
+
+        logger.info(f"Successfully ingested {request.filename}: {records_inserted} records")
+
+        return {
+            "status": "success",
+            "message": f"File ingested successfully",
+            "filename": request.filename,
+            "timestamp": parsed_timestamp.isoformat(),
+            "records_inserted": records_inserted
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error ingesting file {request.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 # Include the fetch endpoint with /api prefix
 app.get("/api/fetch")(fetch_data)
