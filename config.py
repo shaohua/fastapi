@@ -1,5 +1,7 @@
 # Configuration file for the FastAPI application
 
+import os
+
 # Valid client UUIDs for authentication
 # Add your valid client UUIDs here
 VALID_CLIENT_KEYS = {
@@ -9,7 +11,12 @@ VALID_CLIENT_KEYS = {
 }
 
 # Data directory configuration
-DATA_DIRECTORY = "../data"
+# Use path relative to this config file's location for consistency
+_config_dir = os.path.dirname(os.path.abspath(__file__))
+if os.getenv('RAILWAY_ENVIRONMENT_NAME') == 'production':
+    DATA_DIRECTORY = os.path.join(_config_dir, "..", "data")
+else:
+    DATA_DIRECTORY = os.path.join(_config_dir, "data")
 
 # Other configuration options can be added here
 DEBUG_MODE = False
