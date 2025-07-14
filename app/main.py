@@ -272,12 +272,12 @@ async def compare_extensions(
             MAX(install_count) as install_count
         FROM extension_stats
         WHERE extension_id IN ({placeholders})
-          AND captured_at >= NOW() - INTERVAL '%s days'
+          AND captured_at >= NOW() - INTERVAL '{days} days'
         GROUP BY extension_id, name, publisher, DATE(captured_at AT TIME ZONE 'America/Los_Angeles')
         ORDER BY extension_id, day;
         """
 
-        series_data = await fetch_all(time_series_query, *ext_ids, days)
+        series_data = await fetch_all(time_series_query, *ext_ids)
 
         # Organize data by extension
         extensions_data = {}
