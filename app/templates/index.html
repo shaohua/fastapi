@@ -7,6 +7,59 @@ developer tools.{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
+    <!-- Extension Comparison Section -->
+    <div class="bg-white shadow rounded-lg p-6">
+        <div class="mb-4">
+            <h2 class="text-xl font-semibold text-gray-900 mb-2">Compare Extensions</h2>
+            <p class="text-gray-600 text-sm">Search and select up to 10 extensions to compare their install count trends over the last 30 days.</p>
+        </div>
+
+        <!-- Search Input -->
+        <div class="mb-4">
+            <div class="relative">
+                <input
+                    type="text"
+                    id="extensionSearch"
+                    placeholder="Search extensions by name, publisher, or ID..."
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    autocomplete="off"
+                >
+                <div class="absolute right-3 top-2.5 hidden" id="searchSpinner">
+                    <svg class="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+                <div id="searchResults" class="absolute z-10 w-full bg-white border border-gray-300 rounded-lg shadow-lg mt-1 hidden max-h-60 overflow-y-auto"></div>
+            </div>
+        </div>
+
+        <!-- Selected Extensions -->
+        <div id="selectedExtensions" class="mb-4 min-h-[2rem]">
+            <div id="extensionChips" class="flex flex-wrap gap-2"></div>
+        </div>
+
+        <!-- Comparison Chart -->
+        <div id="comparisonChartContainer" class="hidden">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Install Count Comparison (Last 30 Days)</h3>
+            <div class="relative h-80">
+                <canvas id="comparisonChart"></canvas>
+            </div>
+            <div class="mt-4 flex justify-between items-center">
+                <div class="text-sm text-gray-500">
+                    <span id="chartStatus">Select extensions to see comparison</span>
+                </div>
+                <button
+                    id="shareButton"
+                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 hidden"
+                    title="Copy shareable link"
+                >
+                    📋 Share Link
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div class="text-center">
         <h1 class="text-3xl font-bold text-gray-900">Top Growing VS Code Extensions</h1>
         <p class="mt-2 text-gray-600">Extensions with the highest install growth in the last 7 days</p>
@@ -91,59 +144,6 @@ developer tools.{% endblock %}
         {% endfor %}
         </tbody>
         </table>
-    </div>
-</div>
-
-<!-- Extension Comparison Section -->
-<div class="bg-white shadow rounded-lg p-6">
-    <div class="mb-4">
-        <h2 class="text-xl font-semibold text-gray-900 mb-2">Compare Extensions</h2>
-        <p class="text-gray-600 text-sm">Search and select up to 10 extensions to compare their install count trends over the last 30 days.</p>
-    </div>
-
-    <!-- Search Input -->
-    <div class="mb-4">
-        <div class="relative">
-            <input
-                type="text"
-                id="extensionSearch"
-                placeholder="Search extensions by name, publisher, or ID..."
-                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                autocomplete="off"
-            >
-            <div class="absolute right-3 top-2.5 hidden" id="searchSpinner">
-                <svg class="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-            </div>
-            <div id="searchResults" class="absolute z-10 w-full bg-white border border-gray-300 rounded-lg shadow-lg mt-1 hidden max-h-60 overflow-y-auto"></div>
-        </div>
-    </div>
-
-    <!-- Selected Extensions -->
-    <div id="selectedExtensions" class="mb-4 min-h-[2rem]">
-        <div id="extensionChips" class="flex flex-wrap gap-2"></div>
-    </div>
-
-    <!-- Comparison Chart -->
-    <div id="comparisonChartContainer" class="hidden">
-        <h3 class="text-lg font-medium text-gray-900 mb-4">Install Count Comparison (Last 30 Days)</h3>
-        <div class="relative h-80">
-            <canvas id="comparisonChart"></canvas>
-        </div>
-        <div class="mt-4 flex justify-between items-center">
-            <div class="text-sm text-gray-500">
-                <span id="chartStatus">Select extensions to see comparison</span>
-            </div>
-            <button
-                id="shareButton"
-                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 hidden"
-                title="Copy shareable link"
-            >
-                📋 Share Link
-            </button>
-        </div>
     </div>
 </div>
 
@@ -269,24 +269,27 @@ class ExtensionComparison {
             return;
         }
 
+        // Store current search results for easy access
+        this.currentSearchResults = extensions;
+
         this.searchResults.innerHTML = extensions
             .filter(ext => !this.selectedExtensions.has(ext.extension_id))
             .map(ext => `
-                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                <div class="px-4 py-2 hover:bg-gray-100 border-b border-gray-100 last:border-b-0 group"
                      data-extension-id="${ext.extension_id}">
-                    <div class="font-medium text-gray-900">${ext.name}</div>
-                    <div class="text-sm text-gray-500">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1 cursor-pointer" onclick="comparison.addExtensionFromSearch('${ext.extension_id}')">
+                            <div class="font-medium text-gray-900 group-hover:text-blue-600">${ext.name}</div>
+                            <div class="text-sm text-gray-500">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
+                        </div>
+                        <a href="/extension/${ext.extension_id}"
+                           class="ml-2 px-2 py-1 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                           title="View details">
+                            View →
+                        </a>
+                    </div>
                 </div>
             `).join('');
-
-        // Add click handlers to search results
-        this.searchResults.querySelectorAll('[data-extension-id]').forEach(item => {
-            item.addEventListener('click', (e) => {
-                const extensionId = e.currentTarget.dataset.extensionId;
-                const extension = extensions.find(ext => ext.extension_id === extensionId);
-                this.addExtension(extension);
-            });
-        });
 
         this.searchResults.classList.remove('hidden');
     }
@@ -309,6 +312,16 @@ class ExtensionComparison {
         this.searchInput.value = '';
     }
 
+    addExtensionFromSearch(extensionId) {
+        // Find the extension in the current search results
+        if (!this.currentSearchResults) return;
+
+        const extension = this.currentSearchResults.find(ext => ext.extension_id === extensionId);
+        if (extension) {
+            this.addExtension(extension);
+        }
+    }
+
     removeExtension(extensionId) {
         this.selectedExtensions.delete(extensionId);
         this.updateExtensionChips();
@@ -328,13 +341,17 @@ class ExtensionComparison {
 
         this.extensionChips.innerHTML = Array.from(this.selectedExtensions.values())
             .map(ext => `
-                <div class="inline-flex items-center px-3 py-2 rounded-lg text-sm bg-blue-100 text-blue-800 border border-blue-200">
-                    <div class="mr-2">
-                        <div class="font-medium">${ext.name}</div>
-                        <div class="text-xs text-blue-600">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
-                    </div>
+                <div class="inline-flex items-center px-3 py-2 rounded-lg text-sm bg-blue-100 text-blue-800 border border-blue-200 group">
+                    <a href="/extension/${ext.extension_id}"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="mr-2 hover:text-blue-900 transition-colors"
+                       title="View ${ext.name} details (opens in new tab)">
+                        <div class="font-medium group-hover:underline">${ext.name}</div>
+                        <div class="text-xs text-blue-600 group-hover:text-blue-700">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
+                    </a>
                     <button
-                        class="ml-2 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded-full w-5 h-5 flex items-center justify-center text-lg leading-none"
+                        class="ml-2 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded-full w-5 h-5 flex items-center justify-center text-lg leading-none flex-shrink-0"
                         onclick="comparison.removeExtension('${ext.extension_id}')"
                         title="Remove ${ext.name}"
                     >
