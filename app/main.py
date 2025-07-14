@@ -122,16 +122,16 @@ async def extension_detail(request: Request, extension_id: str):
     
     # Get 30-day time series data
     series_query = """
-    SELECT 
-        DATE(captured_at) as day,
+    SELECT
+        DATE(captured_at AT TIME ZONE 'America/Los_Angeles') as day,
         MAX(install_count) as installs,
         MAX(rating) as rating,
         MAX(rating_count) as rating_count,
         MAX(version) as version
-    FROM extension_stats 
-    WHERE extension_id = %s 
+    FROM extension_stats
+    WHERE extension_id = %s
       AND captured_at >= NOW() - INTERVAL '30 days'
-    GROUP BY DATE(captured_at)
+    GROUP BY DATE(captured_at AT TIME ZONE 'America/Los_Angeles')
     ORDER BY day;
     """
     
