@@ -187,6 +187,136 @@ async def api_extensions():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+@app.get("/api/search")
+async def search_extensions(
+    q: str = Query(..., description="Search query for extension name, publisher, or extension_id"),
+    limit: int = Query(10, description="Maximum number of results to return", ge=1, le=50)
+):
+    """
+    Search extensions by name, publisher, or extension_id for autocomplete functionality.
+
+    Parameters:
+    - q: Search query string (minimum 2 characters)
+    - limit: Maximum number of results (default 10, max 50)
+
+    Returns:
+    - JSON with extensions array containing extension_id, name, publisher, install_count
+    """
+    # Validate search query length
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+
+    # Sanitize search query for ILIKE
+    search_term = f"%{q.strip()}%"
+
+    # Search across name, publisher, and extension_id with latest stats
+    query = """
+    SELECT DISTINCT ON (extension_id)
+        extension_id,
+        name,
+        publisher,
+        install_count
+    FROM extension_stats
+    WHERE (
+        name ILIKE %s
+        OR publisher ILIKE %s
+        OR extension_id ILIKE %s
+    )
+    AND install_count > 100  -- Filter out very small extensions
+    ORDER BY extension_id, captured_at DESC, install_count DESC
+    LIMIT %s;
+    """
+
+    try:
+        extensions = await fetch_all(query, search_term, search_term, search_term, limit)
+        return {"extensions": extensions}
+    except Exception as e:
+        logger.error(f"Error in search endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/api/compare")
+async def compare_extensions(
+    extension_ids: str = Query(..., description="Comma-separated list of extension IDs to compare (max 10)"),
+    days: int = Query(30, description="Number of days of historical data to include", ge=7, le=90)
+):
+    """
+    Compare multiple extensions with time-series data for install counts.
+
+    Parameters:
+    - extension_ids: Comma-separated extension IDs (e.g., "ms-python.python,github.copilot")
+    - days: Number of days of historical data (default 30, min 7, max 90)
+
+    Returns:
+    - JSON with extension metadata and time-series data for comparison charts
+    """
+    # Parse and validate extension IDs
+    ext_ids = [ext_id.strip() for ext_id in extension_ids.split(",") if ext_id.strip()]
+
+    if not ext_ids:
+        raise HTTPException(status_code=400, detail="At least one extension ID is required")
+
+    if len(ext_ids) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 extensions can be compared at once")
+
+    # Create placeholders for the query
+    placeholders = ",".join(["%s"] * len(ext_ids))
+
+    try:
+        # Get time-series data for all extensions
+        time_series_query = f"""
+        SELECT
+            extension_id,
+            name,
+            publisher,
+            DATE(captured_at AT TIME ZONE 'America/Los_Angeles') as day,
+            MAX(install_count) as install_count
+        FROM extension_stats
+        WHERE extension_id IN ({placeholders})
+          AND captured_at >= NOW() - INTERVAL '%s days'
+        GROUP BY extension_id, name, publisher, DATE(captured_at AT TIME ZONE 'America/Los_Angeles')
+        ORDER BY extension_id, day;
+        """
+
+        series_data = await fetch_all(time_series_query, *ext_ids, days)
+
+        # Organize data by extension
+        extensions_data = {}
+        for row in series_data:
+            ext_id = row["extension_id"]
+            if ext_id not in extensions_data:
+                extensions_data[ext_id] = {
+                    "extension_id": ext_id,
+                    "name": row["name"],
+                    "publisher": row["publisher"],
+                    "time_series": []
+                }
+
+            extensions_data[ext_id]["time_series"].append({
+                "day": row["day"].strftime("%Y-%m-%d"),
+                "install_count": row["install_count"]
+            })
+
+        # Check for missing extensions
+        found_ids = set(extensions_data.keys())
+        missing_ids = set(ext_ids) - found_ids
+        if missing_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Extensions not found: {', '.join(missing_ids)}"
+            )
+
+        return {
+            "extensions": list(extensions_data.values()),
+            "days": days,
+            "total_extensions": len(extensions_data)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in compare endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 @app.get("/api/download")
 async def download_data_tar(
     key: str = Query(..., description="UUID key for client validation")

@@ -94,6 +94,59 @@ developer tools.{% endblock %}
     </div>
 </div>
 
+<!-- Extension Comparison Section -->
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="mb-4">
+        <h2 class="text-xl font-semibold text-gray-900 mb-2">Compare Extensions</h2>
+        <p class="text-gray-600 text-sm">Search and select up to 10 extensions to compare their install count trends over the last 30 days.</p>
+    </div>
+
+    <!-- Search Input -->
+    <div class="mb-4">
+        <div class="relative">
+            <input
+                type="text"
+                id="extensionSearch"
+                placeholder="Search extensions by name, publisher, or ID..."
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autocomplete="off"
+            >
+            <div class="absolute right-3 top-2.5 hidden" id="searchSpinner">
+                <svg class="animate-spin h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </div>
+            <div id="searchResults" class="absolute z-10 w-full bg-white border border-gray-300 rounded-lg shadow-lg mt-1 hidden max-h-60 overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- Selected Extensions -->
+    <div id="selectedExtensions" class="mb-4 min-h-[2rem]">
+        <div id="extensionChips" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <!-- Comparison Chart -->
+    <div id="comparisonChartContainer" class="hidden">
+        <h3 class="text-lg font-medium text-gray-900 mb-4">Install Count Comparison (Last 30 Days)</h3>
+        <div class="relative h-80">
+            <canvas id="comparisonChart"></canvas>
+        </div>
+        <div class="mt-4 flex justify-between items-center">
+            <div class="text-sm text-gray-500">
+                <span id="chartStatus">Select extensions to see comparison</span>
+            </div>
+            <button
+                id="shareButton"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 hidden"
+                title="Copy shareable link"
+            >
+                📋 Share Link
+            </button>
+        </div>
+    </div>
+</div>
+
 <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
     <div class="flex">
         <div class="flex-shrink-0">
@@ -112,4 +165,432 @@ developer tools.{% endblock %}
     </div>
 </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Extension comparison functionality
+class ExtensionComparison {
+    constructor() {
+        this.selectedExtensions = new Map();
+        this.maxExtensions = 10;
+        this.searchTimeout = null;
+        this.chart = null;
+
+        this.initializeElements();
+        this.bindEvents();
+        this.loadFromURL();
+    }
+
+    initializeElements() {
+        this.searchInput = document.getElementById('extensionSearch');
+        this.searchResults = document.getElementById('searchResults');
+        this.searchSpinner = document.getElementById('searchSpinner');
+        this.extensionChips = document.getElementById('extensionChips');
+        this.chartContainer = document.getElementById('comparisonChartContainer');
+        this.chartCanvas = document.getElementById('comparisonChart');
+        this.chartStatus = document.getElementById('chartStatus');
+        this.shareButton = document.getElementById('shareButton');
+    }
+
+    bindEvents() {
+        // Search input with debouncing
+        this.searchInput.addEventListener('input', (e) => {
+            clearTimeout(this.searchTimeout);
+            this.searchTimeout = setTimeout(() => {
+                this.performSearch(e.target.value);
+            }, 300);
+        });
+
+        // Hide search results when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!this.searchInput.contains(e.target) && !this.searchResults.contains(e.target)) {
+                this.hideSearchResults();
+            }
+        });
+
+        // Share button
+        this.shareButton.addEventListener('click', () => {
+            this.copyShareLink();
+        });
+    }
+
+    async performSearch(query) {
+        if (query.length < 2) {
+            this.hideSearchResults();
+            this.searchSpinner.classList.add('hidden');
+            return;
+        }
+
+        // Show loading spinner
+        this.searchSpinner.classList.remove('hidden');
+
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=10`);
+            const data = await response.json();
+
+            this.searchSpinner.classList.add('hidden');
+
+            if (response.ok) {
+                this.displaySearchResults(data.extensions);
+            } else {
+                console.error('Search error:', data.detail);
+                this.showSearchError(data.detail || 'Search failed');
+            }
+        } catch (error) {
+            console.error('Search request failed:', error);
+            this.searchSpinner.classList.add('hidden');
+            this.showSearchError('Network error - please try again');
+        }
+    }
+
+    showSearchError(message) {
+        this.searchResults.innerHTML = `
+            <div class="px-4 py-3 text-red-600 text-sm">
+                <div class="flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                    </svg>
+                    ${message}
+                </div>
+            </div>
+        `;
+        this.searchResults.classList.remove('hidden');
+
+        // Hide error after 3 seconds
+        setTimeout(() => {
+            this.hideSearchResults();
+        }, 3000);
+    }
+
+    displaySearchResults(extensions) {
+        if (extensions.length === 0) {
+            this.hideSearchResults();
+            return;
+        }
+
+        this.searchResults.innerHTML = extensions
+            .filter(ext => !this.selectedExtensions.has(ext.extension_id))
+            .map(ext => `
+                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                     data-extension-id="${ext.extension_id}">
+                    <div class="font-medium text-gray-900">${ext.name}</div>
+                    <div class="text-sm text-gray-500">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
+                </div>
+            `).join('');
+
+        // Add click handlers to search results
+        this.searchResults.querySelectorAll('[data-extension-id]').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const extensionId = e.currentTarget.dataset.extensionId;
+                const extension = extensions.find(ext => ext.extension_id === extensionId);
+                this.addExtension(extension);
+            });
+        });
+
+        this.searchResults.classList.remove('hidden');
+    }
+
+    hideSearchResults() {
+        this.searchResults.classList.add('hidden');
+    }
+
+    addExtension(extension) {
+        if (this.selectedExtensions.size >= this.maxExtensions) {
+            alert(`Maximum ${this.maxExtensions} extensions can be compared at once.`);
+            return;
+        }
+
+        this.selectedExtensions.set(extension.extension_id, extension);
+        this.updateExtensionChips();
+        this.updateChart();
+        this.updateURL();
+        this.hideSearchResults();
+        this.searchInput.value = '';
+    }
+
+    removeExtension(extensionId) {
+        this.selectedExtensions.delete(extensionId);
+        this.updateExtensionChips();
+        this.updateChart();
+        this.updateURL();
+    }
+
+    updateExtensionChips() {
+        if (this.selectedExtensions.size === 0) {
+            this.extensionChips.innerHTML = `
+                <div class="text-gray-500 text-sm italic">
+                    No extensions selected. Search above to add extensions for comparison.
+                </div>
+            `;
+            return;
+        }
+
+        this.extensionChips.innerHTML = Array.from(this.selectedExtensions.values())
+            .map(ext => `
+                <div class="inline-flex items-center px-3 py-2 rounded-lg text-sm bg-blue-100 text-blue-800 border border-blue-200">
+                    <div class="mr-2">
+                        <div class="font-medium">${ext.name}</div>
+                        <div class="text-xs text-blue-600">${ext.publisher} • ${ext.install_count.toLocaleString()} installs</div>
+                    </div>
+                    <button
+                        class="ml-2 text-blue-600 hover:text-blue-800 hover:bg-blue-200 rounded-full w-5 h-5 flex items-center justify-center text-lg leading-none"
+                        onclick="comparison.removeExtension('${ext.extension_id}')"
+                        title="Remove ${ext.name}"
+                    >
+                        ×
+                    </button>
+                </div>
+            `).join('');
+
+        // Show count
+        if (this.selectedExtensions.size > 1) {
+            this.extensionChips.innerHTML += `
+                <div class="text-sm text-gray-500 self-center ml-2">
+                    ${this.selectedExtensions.size}/10 selected
+                </div>
+            `;
+        }
+    }
+
+    async updateChart() {
+        if (this.selectedExtensions.size === 0) {
+            this.chartContainer.classList.add('hidden');
+            this.shareButton.classList.add('hidden');
+            if (this.chart) {
+                this.chart.destroy();
+                this.chart = null;
+            }
+            return;
+        }
+
+        this.chartStatus.innerHTML = `
+            <div class="flex items-center">
+                <svg class="animate-spin h-4 w-4 mr-2 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Loading chart data...
+            </div>
+        `;
+        this.chartContainer.classList.remove('hidden');
+        this.shareButton.classList.add('hidden');
+
+        try {
+            const extensionIds = Array.from(this.selectedExtensions.keys()).join(',');
+            const response = await fetch(`/api/compare?extension_ids=${encodeURIComponent(extensionIds)}&days=30`);
+            const data = await response.json();
+
+            if (response.ok) {
+                this.renderChart(data);
+                this.shareButton.classList.remove('hidden');
+            } else {
+                this.showChartError(data.detail || 'Failed to load chart data');
+            }
+        } catch (error) {
+            console.error('Chart data request failed:', error);
+            this.showChartError('Network error - please try again');
+        }
+    }
+
+    showChartError(message) {
+        this.chartStatus.innerHTML = `
+            <div class="flex items-center text-red-600">
+                <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                </svg>
+                ${message}
+            </div>
+        `;
+        this.shareButton.classList.add('hidden');
+
+        // Clear the canvas
+        if (this.chart) {
+            this.chart.destroy();
+            this.chart = null;
+        }
+    }
+
+    renderChart(data) {
+        // Destroy existing chart if it exists
+        if (this.chart) {
+            this.chart.destroy();
+        }
+
+        // Prepare chart data
+        const allDays = new Set();
+        data.extensions.forEach(ext => {
+            ext.time_series.forEach(point => allDays.add(point.day));
+        });
+
+        const sortedDays = Array.from(allDays).sort();
+
+        // Generate colors for each extension
+        const colors = [
+            '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
+            '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1'
+        ];
+
+        const datasets = data.extensions.map((ext, index) => {
+            // Create a map for quick lookup
+            const dataMap = new Map();
+            ext.time_series.forEach(point => {
+                dataMap.set(point.day, point.install_count);
+            });
+
+            // Fill in data for all days (null for missing days)
+            const chartData = sortedDays.map(day => dataMap.get(day) || null);
+
+            return {
+                label: ext.name,
+                data: chartData,
+                borderColor: colors[index % colors.length],
+                backgroundColor: colors[index % colors.length] + '20', // 20% opacity
+                borderWidth: 2,
+                fill: false,
+                tension: 0.1,
+                pointRadius: 2,
+                pointHoverRadius: 4
+            };
+        });
+
+        // Create the chart
+        const ctx = this.chartCanvas.getContext('2d');
+        this.chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sortedDays,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const value = context.parsed.y;
+                                return `${context.dataset.label}: ${value ? value.toLocaleString() : 'No data'} installs`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        },
+                        ticks: {
+                            maxTicksLimit: 10
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Install Count'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        this.chartStatus.textContent = `Comparing ${data.extensions.length} extension${data.extensions.length > 1 ? 's' : ''} over ${data.days} days`;
+    }
+
+    updateURL() {
+        const extensionIds = Array.from(this.selectedExtensions.keys());
+        const url = new URL(window.location);
+
+        if (extensionIds.length > 0) {
+            url.searchParams.set('compare', extensionIds.join(','));
+        } else {
+            url.searchParams.delete('compare');
+        }
+
+        window.history.pushState({}, '', url);
+    }
+
+    loadFromURL() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const compareParam = urlParams.get('compare');
+
+        if (compareParam) {
+            const extensionIds = compareParam.split(',').slice(0, this.maxExtensions);
+            this.loadExtensionsById(extensionIds);
+        }
+    }
+
+    async loadExtensionsById(extensionIds) {
+        // For now, we'll implement a simple version that searches for each extension
+        // In a real implementation, we'd have a batch endpoint
+        for (const extensionId of extensionIds) {
+            try {
+                const response = await fetch(`/api/search?q=${encodeURIComponent(extensionId)}&limit=1`);
+                const data = await response.json();
+
+                if (response.ok && data.extensions.length > 0) {
+                    const extension = data.extensions.find(ext => ext.extension_id === extensionId);
+                    if (extension) {
+                        this.selectedExtensions.set(extension.extension_id, extension);
+                    }
+                }
+            } catch (error) {
+                console.error(`Failed to load extension ${extensionId}:`, error);
+            }
+        }
+
+        this.updateExtensionChips();
+        this.updateChart();
+    }
+
+    copyShareLink() {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            const originalText = this.shareButton.textContent;
+            this.shareButton.textContent = '✓ Copied!';
+            setTimeout(() => {
+                this.shareButton.textContent = originalText;
+            }, 2000);
+        }).catch(() => {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = window.location.href;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+
+            const originalText = this.shareButton.textContent;
+            this.shareButton.textContent = '✓ Copied!';
+            setTimeout(() => {
+                this.shareButton.textContent = originalText;
+            }, 2000);
+        });
+    }
+}
+
+// Initialize comparison functionality when page loads
+let comparison;
+document.addEventListener('DOMContentLoaded', () => {
+    comparison = new ExtensionComparison();
+});
+</script>
 {% endblock %}
